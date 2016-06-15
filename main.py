@@ -1,6 +1,9 @@
+import asyncio
+import os
 import time
 from ast import FunctionDef, NodeVisitor, Call, Name, ClassDef, parse
 from os import path
+from os.path import join, isfile, basename
 
 from pydot import Cluster as GVCluster
 from pydot import Dot as GVDot
@@ -257,6 +260,11 @@ class DepVisual(object):
         self._dep_graph = DependencyGraph(label=self._module.get_full_name())
 
     def draw(self, path: str, format: str = "raw") -> None:
+        if format == "raw":
+            path = path.split(".")[0]
+        else:
+            path = path.split(".")[0] + "." + format
+
         self._module.visit(self._tree)
         for cls in self._module.get_cls_def():
             self._dep_graph.add_node(Node(cls.get_full_name(), 1, label=cls.get_name()))
@@ -270,9 +278,35 @@ class DepVisual(object):
         self._dep_graph.draw(path, format=format)
 
 
+def generate_from_file(src, dst, format="raw"):
+    vis = DepVisual(src)
+    vis.draw(dst, format=format)
+
+
+@asyncio.coroutine
+def generate_from_file_async(src, dst, loop, format="raw"):
+    yield from loop.run_in_executor(None, generate_from_file, src, dst, format)
+
+
+def generate_from_dir(src_dir, dst_dir, format="raw"):
+    loop = asyncio.get_event_loop()
+    tasks = []
+    files = [join(src_dir, f) for f in os.listdir(src_dir) if
+             isfile(join(src_dir, f)) and f.endswith(".py") and not f.startswith("__")]
+
+    for f in files:
+        dst_path = join(dst_dir, basename(f).split(".")[0])
+        tasks.append(asyncio.ensure_future(generate_from_file_async(f, dst_path, loop, format=format)))
+
+    loop.run_until_complete(asyncio.wait(tasks))
+    loop.close()
+
 if __name__ == '__main__':
     start = time.time()
-    vis = DepVisual("/Users/Marvin/.pyenv/versions/3.6-dev/lib/python3.6/asyncio/base_events.py")
-    vis.draw("/Users/Marvin/PycharmProjects/DepAnalysis/output.png", format="png")
+    src_dir = "/Users/Marvin/Desktop/asyncio/"
+    dst_dir = "/Users/Marvin/PycharmProjects/DepAnalysis/call_graphs"
+    format = "png"
+
+    generate_from_dir(src_dir, dst_dir, format=format)
 
     print(time.time() - start)
